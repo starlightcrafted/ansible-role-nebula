@@ -30,8 +30,6 @@
         remote_src: true
         owner: root
         group: root
-      notify:
-        - Restart nebula service
     
     - name: Install - Register version as fact
       ansible.builtin.lineinfile:
@@ -42,6 +40,8 @@
         group: root
         mode: '0644'
         create: true
+  notify:
+    - Restart nebula service
   always:
     - name: Delete temporary directory
       ansible.builtin.file:
