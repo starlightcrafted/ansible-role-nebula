@@ -1,7 +1,5 @@
 nebula:
   - version_start: 0.0.0
     version_end: 4.0.0
-    download_url: "https://github.com/slackhq/nebula/releases/download/v{{ nebula_version }}/nebula-linux-amd64.tar.gz"
+    download_url: "https://github.com/slackhq/nebula/releases/download/v{{ nebula_version }}/nebula-linux-{{ arch_map['nebula'][ansible_architecture] }}.tar.gz"
     download_filename: "nebula-linux-amd64.tar.gz"
-
-
