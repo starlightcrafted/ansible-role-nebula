@@ -1,0 +1,14 @@
+---
+- name: Install and Configure Nebula VPN
+  block:
+    - name: Generate Vars
+      ansible.builtin.include_tasks: variables.yml
+
+    - name: Install Nebula
+      ansible.builtin.include_tasks: install_nebula.yml
+
+    - name: Nebula Certificate
+      ansible.builtin.include_tasks: nebula_certificate.yml
+
+    - name: Configure Nebula
+      ansible.builtin.include_tasks: configure_nebula.yml

@@ -1,0 +1,35 @@
+name: commitlint
+on:
+  pull_request:
+    branches:
+      - main
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: node:22-alpine 
+    env:
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      NODE_PACKAGE_COMMITLINT_VER: 19.7.1
+      NODE_PACKAGE_SEMANITICRELEASE_VER: 11.0.1
+    steps:
+      - name: Install Git
+        run: |
+          apk add --no-cache git
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fix Permissions
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install CommitLint
+        run: |
+          npm install \
+            commitlint@${NODE_PACKAGE_COMMITLINT_VER} \
+            conventional-changelog-conventionalcommits \
+            @commitlint/config-conventional@${NODE_PACKAGE_COMMITLINT_VER}
+          echo "module.exports = {extends: ['@commitlint/config-conventional']}" > commitlint.config.js
+      - name: Run CommitLint
+        run: |
+          npx commitlint --from "$PR_BASE_SHA" --to "$PR_HEAD_SHA" --verbose

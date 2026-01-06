@@ -1,0 +1,209 @@
+---
+- name: Certificate - Check if exists
+  ansible.builtin.stat:
+    path: "/etc/nebula/node.crt"
+  register: nebula_node_cert_file
+
+- name: Certificate - Set default action
+  ansible.builtin.set_fact:
+    nebula_certificate_generate: "{{ not nebula_node_cert_file.stat.exists }}"
+    nebula_node_ipv4_address: ""
+    nebula_node_ipv6_address: ""
+
+- name: Certificate - Read details
+  block:
+    - name: Read details from nebula-cert
+      ansible.builtin.command: "nebula-cert print -json -path /etc/nebula/node.crt"
+      register: nebula_node_cert_raw
+      changed_when: false
+    - name: Save details to fact
+      ansible.builtin.set_fact:
+        nebula_node_cert: "{{ nebula_node_cert_raw.stdout | from_json }}"
+  when: nebula_node_cert_file.stat.exists
+  
+- name: Certificate - Check groups
+  ansible.builtin.set_fact:
+    nebula_certificate_generate: "{{ not (nebula_node_cert.details.groups | sort) == (nebula_groups | sort) }}"
+  when: nebula_node_cert_file.stat.exists
+
+- name: Certificate - Check CIDRs
+  ansible.builtin.set_fact:
+    nebula_node_ipv4_cidr: "{{ nebula_node_cert.details.ips | ansible.utils.ipv4 | first | default('') }}"
+    nebula_node_ipv6_cidr: "{{ nebula_node_cert.details.ips | ansible.utils.ipv6 | first | default('') }}"
+  when: nebula_node_cert_file.stat.exists
+
+- name: Certificate - Check Addresses
+  ansible.builtin.set_fact:
+    nebula_node_ipv4_address: "{{ nebula_node_ipv4_cidr.split('/')[0] | default('') }}"
+    nebula_node_ipv6_address: "{{ nebula_node_ipv6_cidr.split('/')[0] | default('') }}"
+  when: nebula_node_cert_file.stat.exists
+
+- name: Certificate - Check subnets
+  ansible.builtin.set_fact:
+    nebula_certificate_generate: "{{ not (nebula_node_cert.details.subnets | sort) == (nebula_subnets | sort) }}"
+
+- name: Certificate - Allocate IP with phpIPAM
+  when: nebula_node_ipv4_cidr == ""
+  block:
+    - name: Get auth token from PHPIPAM
+      ansible.builtin.uri:
+        url: "{{ phpipam_url }}/api/{{ phpipam_app_id }}/user/"
+        method: GET
+        force_basic_auth: yes
+        validate_certs: no
+        headers:
+          token: "{{ phpipam_token }}"
+      register: phpipam_auth
+      delegate_to: localhost
+      failed_when: phpipam_auth.status != 200
+
+    - name: Allocate IPv4 from PHPIPAM
+      ansible.builtin.uri:
+        url: "{{ phpipam_url }}/api/{{ phpipam_app_id }}/addresses/first_free/{{ phpipam_subnet_ipv4_id }}/"
+        method: POST
+        headers:
+          token: "{{ phpipam_token }}"
+        body_format: json
+        body:
+          hostname: "{{ inventory_hostname }}"
+          description: "Managed by Ansible"
+        validate_certs: yes
+        status_code: 201 
+      register: next_ipv4_allocation
+      delegate_to: localhost
+      failed_when: next_ipv4_allocation.json.id is not defined or not next_ipv4_allocation.json.success == true
+
+    - name: Get IP details from PHPIPAM
+      ansible.builtin.uri:
+        url: "{{ phpipam_url }}/api/{{ phpipam_app_id }}/addresses/{{ next_ipv4_allocation.json.id }}/"
+        method: GET
+        headers:
+          token: "{{ phpipam_token }}"
+        validate_certs: no
+      register: next_ipv4
+
+    - name: Get subnet details from PHPIPAM to find mask
+      ansible.builtin.uri:
+        url: "{{ phpipam_url }}/api/{{ phpipam_app_id }}/subnets/{{ phpipam_subnet_ipv4_id }}/"
+        method: GET
+        headers:
+          token: "{{ phpipam_token }}"
+        validate_certs: no
+      register: ipv4_subnet_details
+      delegate_to: localhost
+      failed_when: ipv4_subnet_details.status != 200 or not ipv4_subnet_details.json.data
+
+    - name: Set Nebula IPv4 and mask facts
+      ansible.builtin.set_fact:
+        nebula_node_ipv4_cidr: "{{ next_ipv4.json.data.ip }}/{{ ipv4_subnet_details.json.data.mask }}"
+        nebula_node_ipv4_address: "{{ next_ipv4.json.data.ip }}"
+        nebula_certificate_generate: True
+
+- name: Certificate Generation
+  when: nebula_certificate_generate
+  block:
+    - name: Create secure in-memory workspace for Nebula CA
+      ansible.builtin.tempfile:
+        state: directory
+        path: "/dev/shm"
+        suffix: nebula_ca
+      register: nebula_ca_temp_dir
+      delegate_to: localhost
+
+    - name: Create nebula binary directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: nebula
+      register: nebula_binary_temp_dir
+      delegate_to: localhost
+
+    - name: Fetch CA certificate from S3
+      amazon.aws.s3_object: 
+        aws_access_key: "{{ nebula_ca['access_key'] }}"
+        aws_secret_key: "{{ nebula_ca['secret_key'] }}"
+        endpoint_url: "{{ nebula_ca['endpoint_url'] }}"
+        bucket: "{{ nebula_ca['s3_bucket'] }}"
+        object: "{{ nebula_ca['cert_path'] }}"
+        dest: "{{ nebula_ca_temp_dir.path }}/ca.crt"
+        mode: get
+      delegate_to: localhost
+
+    - name: Fetch CA key from S3
+      amazon.aws.s3_object:
+        aws_access_key: "{{ nebula_ca['access_key'] }}"
+        aws_secret_key: "{{ nebula_ca['secret_key'] }}"
+        endpoint_url: "{{ nebula_ca['endpoint_url'] }}"
+        bucket: "{{ nebula_ca['s3_bucket'] }}"
+        object: "{{ nebula_ca['key_path'] }}"
+        dest: "{{ nebula_ca_temp_dir.path }}/ca.key"
+        mode: get
+      delegate_to: localhost
+      no_log: true
+
+    - name: Download and install nebula-cert binary
+      ansible.builtin.unarchive:
+        src: "{{ nebula_binary_baseurl ~ 'v' ~ nebula_version ~ '/nebula-linux-amd64.tar.gz' | default('https://github.com/slackhq/nebula/releases/download/v' ~ nebula_version ~ '/nebula-linux-amd64.tar.gz') }}"
+        dest: "{{ nebula_binary_temp_dir.path }}"
+        remote_src: yes
+        creates: "{{ nebula_binary_temp_dir.path }}/nebula-cert"
+      delegate_to: localhost
+
+    - name: Sign the new host certificate
+      ansible.builtin.command: >
+        {{ nebula_binary_temp_dir.path }}/nebula-cert sign
+        -ca-crt "{{ nebula_ca_temp_dir.path }}/ca.crt"
+        -ca-key "{{ nebula_ca_temp_dir.path }}/ca.key"
+        -name "{{ inventory_hostname }}"
+        -ip "{{ nebula_node_ipv4_cidr }}"
+        -groups "{{ nebula_groups | sort | join(',') }}"
+        -subnets "{{ nebula_subnets | sort | join(',') }}"
+        -out-crt "{{ nebula_ca_temp_dir.path }}/{{ inventory_hostname }}.crt"
+        -out-key "{{ nebula_ca_temp_dir.path }}/{{ inventory_hostname }}.key"
+      delegate_to: localhost
+      changed_when: true
+
+    - name: Transfer generated certificate to target node
+      ansible.builtin.copy:
+        src: "{{ nebula_ca_temp_dir.path }}/{{ inventory_hostname }}.crt"
+        dest: "/etc/nebula/node.crt"
+        mode: '0644'
+        owner: nebula
+        group: nebula
+        backup: yes
+      notify:
+        - Restart nebula service
+
+    - name: Transfer generated private key to target node
+      ansible.builtin.copy:
+        src: "{{ nebula_ca_temp_dir.path }}/{{ inventory_hostname }}.key"
+        dest: "/etc/nebula/node.key"
+        mode: '0600'
+        owner: nebula
+        group: nebula
+        backup: yes
+      notify:
+        - Restart nebula service
+
+    - name: Transfer CA certificate to target node
+      ansible.builtin.copy:
+        src: "{{ nebula_ca_temp_dir.path }}/ca.crt"
+        dest: "/etc/nebula/ca.crt"
+        mode: '0644'
+        owner: nebula
+        group: nebula
+        backup: yes
+      notify:
+        - Restart nebula service
+  always:
+    - name: Delete temporary directory
+      ansible.builtin.file:
+        state: absent
+        path: "{{ nebula_binary_temp_dir.path }}"
+      changed_when: false
+      delegate_to: localhost
+    - name: Delete temporary directory
+      ansible.builtin.file:
+        state: absent
+        path: "{{ nebula_ca_temp_dir.path }}"
+      changed_when: false
+      delegate_to: localhost

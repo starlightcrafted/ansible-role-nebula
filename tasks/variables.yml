@@ -1,0 +1,34 @@
+---
+- name: Vars - Architecture Map
+  ansible.builtin.include_vars:
+    file: arch_map.yml
+    name: arch_map
+
+- name: Vars - Download Map
+  ansible.builtin.include_vars:
+    file: download_map.yml
+    name: download_map
+
+- name: Vars - Architecture Map for nebula
+  ansible.builtin.set_fact:
+    nebula_arch_map: "{{ item['arch_map'] }}"
+  loop: "{{ arch_map['nebula'] }}"
+  when:
+    - nebula_version is version(item['version_start'], '>=')
+    - nebula_version is version(item['version_end'], '<')
+
+- name: Vars - Download Map for nebula
+  ansible.builtin.set_fact:
+    nebula_download_map: "{{ item }}"
+  loop: "{{ download_map['nebula'] }}"
+  when:
+    - nebula_version is version(item['version_start'], '>=')
+    - nebula_version is version(item['version_end'], '<')
+
+- name: Build Nebula Config
+  ansible.builtin.set_fact:
+    nebula_config_combined: >-
+      {{
+        nebula_config_defaults |
+        combine(nebula_config | default({}), recursive=True)
+      }}

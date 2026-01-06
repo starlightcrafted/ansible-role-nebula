@@ -1,0 +1,119 @@
+---
+# Nebula version to install
+nebula_version: "1.9.7"
+
+# Nebula configuration (can be overridden)
+nebula_config: {}
+
+# Nebula groups for this node
+nebula_groups: []
+
+# Nebula subnets for this node
+nebula_subnets: []
+
+# CA configuration for certificate generation
+nebula_ca:
+  access_key: ""
+  secret_key: ""
+  endpoint_url: ""
+  s3_bucket: ""
+  cert_path: "ca.crt"
+  key_path: "ca.key"
+
+# Should we manage the hosts file and map Nebula IPs to the hostname
+nebula_manage_hosts: true
+
+# Should we use an alternative base URL that replaces the GitHub URL to download Nebula
+# nebula_binary_baseurl
+
+# PHPIPAM configuration for IP management
+phpipam_url: ""
+phpipam_app_id: ""
+phpipam_token: ""
+phpipam_subnet_id: ""
+
+nebula_config_defaults:
+
+  # PKI settings control the certificates and trust for the node.
+  pki:
+    # A list of certificate fingerprints to refuse connections from. Default is empty.
+    blocked_fingerprints: []
+    # If true, Nebula will tear down connections to peers with invalid certificates.
+    # It is highly recommended to leave this as true.
+    disconnect_invalid_nodes: true
+  
+  static_host_map: {}
+
+  # Settings for when this node is acting as a Lighthouse.
+  lighthouse_server:
+    # A node is NOT a lighthouse by default.
+    enabled: false
+    dns_server:
+      # Do not run a DNS server by default.
+      enabled: false
+      # IP to bind the lighthouse DNS server to. '0.0.0.0' for all interfaces.
+      host: '127.0.0.1'
+      # Default DNS port.
+      port: 53
+
+  # A list of Nebula IPs for the lighthouses this node should connect to.
+  # This should be empty on lighthouse nodes themselves.
+  lighthouse_nodes: []
+
+  # Network listener settings.
+  bind:
+    # Listen on all available network interfaces.
+    host: '[::]'
+    # Default Nebula port.
+    port: 4242
+
+  # Relay settings for assisting nodes behind difficult NATs.
+  relays:
+    # Do not use relays by default.
+    enabled: true
+    # A list of Nebula IPs of nodes to use as relays.
+    nodes: []
+  relay_server:
+    # A node is NOT a relay by default.
+    enabled: false
+
+  # TUN interface settings.
+  interface:
+    # The name of the Nebula network interface. 'nebula1' is a common default.
+    name: 'nebula1'
+    # By default, Nebula drops local broadcast traffic. Setting this to `true` allows it.
+    broadcast_traffic: false
+    # By default, Nebula drops multicast traffic. Setting this to `true` allows it.
+    multicast_traffic: false
+    # Transmit queue length. 500 is the default.
+    tx_queue: 500
+    # MTU for the interface. 1300 is a safe default.
+    mtu: 1300
+
+  # A dictionary of unsafe routes to advertise to other nodes.
+  # This allows a Nebula node to act as a gateway to a local subnet.
+  # Default is empty.
+  routes: {}
+  # Example route structure:
+  # routes:
+  #   '10.0.1.0/24':
+  #     gateway: '192.168.100.1' # The Nebula IP of the gateway for that route
+  #     install: true # Whether Nebula should manage adding this to the routing table
+
+  # Logging settings.
+  logging:
+    # Log level. Can be 'INFO', 'DEBUG', 'WARN', 'ERROR'.
+    level: 'INFO'
+
+  # Firewall settings.
+  firewall:
+    inbound_rules:
+      - protocol: icmp
+        port: any
+        sources:
+          - any
+    outbound_rules:
+      - protocol: any
+        port: any
+        destinations:
+          - any

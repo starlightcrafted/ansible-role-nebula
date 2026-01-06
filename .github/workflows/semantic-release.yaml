@@ -1,0 +1,47 @@
+name: semantic-release
+on:
+  push:
+    branches:
+      - main
+permissions:
+  actions: read
+  attestations: none
+  checks: read
+  contents: write
+  deployments: none
+  id-token: write
+  issues: write
+  discussions: read
+  packages: read
+  pages: none
+  pull-requests: write
+  repository-projects: none
+  security-events: none
+  statuses: none
+jobs:
+  semantic-release:
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-alpine 
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PR_NUMBER: ${{ github.event.number }}
+        REPO_NAME: ${{ github.repository }}
+        NODE_PACKAGE_SEMANITICRELEASE_VER: 11.0.1
+    steps:
+      - name: Install Git
+        run: |
+          apk add --no-cache git
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fix Permissions
+        run: git config --global --add safe.directory /__w/ansible-role-nebula/ansible-role-nebula
+      - name: Install Semantic-Release
+        run: |
+          npm install \
+            @semantic-release/github@${NODE_PACKAGE_SEMANITICRELEASE_VER} \
+            @semantic-release/exec
+      - name: Run Semantic-Release
+        run: |
+          npx semantic-release

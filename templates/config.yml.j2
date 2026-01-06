@@ -1,0 +1,135 @@
+# PKI defines the location of credentials for this node. Each of these can also be inlined by using the yaml ": |" syntax.
+pki:
+  # The CAs that are accepted by this node. Must contain one or more certificates created by 'nebula-cert ca'
+  ca: /etc/nebula/ca.crt
+  cert: /etc/nebula/node.crt
+  key: /etc/nebula/node.key
+  # blocklist is a list of certificate fingerprints that we will refuse to talk to
+  blocklist:
+{%- for fingerprint in nebula_config_combined['pki']['blocked_fingerprints'] %}
+    - {{ fingerprint }}
+{%- endfor %}
+
+  disconnect_invalid: {{ nebula_config_combined['pki']['disconnect_invalid_nodes'] }}
+
+static_host_map:
+{% for nebula_ip, endpoints in nebula_config_combined['static_host_map'].items() %}
+  {{ nebula_ip }}:
+{% for endpoint in endpoints %}
+{% set address, port = endpoint.rsplit(':', 1) %}
+{% if address | ansible.utils.ipaddr('ipv6') %}
+    - "[{{ address }}]:{{ port }}"
+{% else %}
+    - "{{ endpoint }}"
+{% endif %}
+{% endfor %}
+{% endfor %}
+
+lighthouse:
+  # am_lighthouse is used to enable lighthouse functionality for a node. This should ONLY be true on nodes
+  # you have configured to be lighthouses in your network
+  am_lighthouse: {{ nebula_config_combined['lighthouse_server']['enabled'] }}
+  # serve_dns optionally starts a dns listener that responds to various queries and can even be
+  # delegated to for resolution
+  serve_dns: {{ nebula_config_combined['lighthouse_server']['dns_server']['enabled'] }}
+  dns:
+    # The DNS host defines the IP to bind the dns listener to. This also allows binding to the nebula node IP.
+    host: {{ nebula_config_combined['lighthouse_server']['dns_server']['host'] }}
+    port: {{ nebula_config_combined['lighthouse_server']['dns_server']['port'] }}
+  # interval is the number of seconds between updates from this node to a lighthouse.
+  # during updates, a node sends information about its current IP addresses to each node.
+  interval: 60
+  # hosts is a list of lighthouse hosts this node should report to and query from
+  # IMPORTANT: THIS SHOULD BE EMPTY ON LIGHTHOUSE NODES
+  # IMPORTANT2: THIS SHOULD BE LIGHTHOUSES' NEBULA IPs, NOT LIGHTHOUSES' REAL ROUTABLE IPs
+  hosts:
+{% for node in nebula_config_combined['lighthouse_nodes'] %}
+    - {{ node }}
+{% endfor %}
+
+listen:
+  # To listen on only ipv4, use "0.0.0.0"
+  host: '{{ nebula_config_combined['bind']['host'] }}'
+  port: {{ nebula_config_combined['bind']['port'] }}
+routines: 10
+punchy:
+  punch: false
+  respond: false
+  delay: 1s
+  respond_delay: 5s
+cipher: aes
+sshd:
+  enabled: false
+relay:
+  relays:
+{% for node in nebula_config_combined['relays']['nodes'] %}
+    - {{ node }}
+{% endfor %}
+
+  # Set am_relay to true to permit other hosts to list my IP in their relays config. Default false.
+  am_relay: {{ nebula_config_combined['relay_server']['enabled'] }}
+  use_relays: {{ nebula_config_combined['relays']['enabled'] }}
+tun:
+  disabled: false
+  dev: {{ nebula_config_combined['interface']['name'] }}
+  drop_local_broadcast: {{ not nebula_config_combined['interface']['broadcast_traffic'] }}
+  drop_multicast: {{ not nebula_config_combined['interface']['multicast_traffic'] }}
+  tx_queue: {{ nebula_config_combined['interface']['tx_queue'] }}
+  mtu: {{ nebula_config_combined['interface']['mtu'] }}
+  unsafe_routes:
+{%- for route, route_config in nebula_config_combined['routes'] %}
+    - route: {{ route }}
+      via: {{ route_config['gateway'] }}
+      install: {{ route_config['install'] }}
+{%- endfor %}
+
+logging:
+  level: {{ nebula_config_combined['logging']['level'] }}
+  format: text
+stats:
+  type: prometheus
+  listen: 127.0.0.1:8080
+  path: /metrics
+  namespace: prometheusns
+  subsystem: nebula
+  interval: 10s
+  message_metrics: true
+  lighthouse_metrics: true
+tunnels:
+  drop_inactive: true
+  inactivity_timeout: 10m
+firewall:
+  # Action to take when a packet is not allowed by the firewall rules.
+  # Can be one of:
+  #   `drop` (default): silently drop the packet.
+  #   `reject`: send a reject reply.
+  #     - For TCP, this will be a RST "Connection Reset" packet.
+  #     - For other protocols, this will be an ICMP port unreachable packet.
+  outbound_action: drop
+  inbound_action: drop
+  conntrack:
+    tcp_timeout: 12m
+    udp_timeout: 3m
+    default_timeout: 10m
+  outbound:
+    - port: any
+      proto: icmp
+      host: any
+{% for rule in nebula_config_combined['firewall']['outbound_rules'] %}
+{% for destination in rule['destinations'] %}
+    - proto: {{ rule['protocol'] }}
+      port: {{ rule['port'] | default(0) }}
+      group: {{ destination }}
+{% endfor %}
+{% endfor %}
+  inbound:
+    - port: any
+      proto: icmp
+      host: any
+{% for rule in nebula_config_combined['firewall']['inbound_rules'] %}
+{% for source in rule['sources'] %}
+    - proto: {{ rule['protocol'] }}
+      port: {{ rule['port'] | default(0) }}
+      group: {{ source }}
+{% endfor %}
+{% endfor %}

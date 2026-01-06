@@ -1,0 +1,84 @@
+---
+- name: Install - Check current status of binary
+  ansible.builtin.stat:
+    path: "/usr/local/bin/nebula"
+  register: nebula_installation
+
+- name: Install - Download Binary
+  when: not nebula_installation.stat.exists
+    or ansible_local['nebula_runningversion'] is not defined
+    or ansible_local['nebula_runningversion'] != nebula_version
+  block:
+    - name: Install - Create nebula binary directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: nebula
+      register: nebula_install_temp_dir
+
+    - name: Install - Download Nebula
+      ansible.builtin.get_url:
+        url: "{{ nebula_download_map['download_url'] }}"
+        dest: "{{ nebula_install_temp_dir.path }}/{{ nebula_download_map['download_filename'] }}"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install - Extract binaries
+      ansible.builtin.unarchive:
+        src: "{{ nebula_install_temp_dir.path }}/{{ nebula_download_map['download_filename'] }}"
+        dest: /usr/local/bin
+        remote_src: true
+        owner: root
+        group: root
+      notify:
+        - Restart nebula service
+    
+    - name: Install - Register version as fact
+      ansible.builtin.lineinfile:
+        path: /etc/ansible/facts.d/nebula_runningversion.fact
+        regexp: ".*"
+        line: "\"{{ nebula_version }}\""
+        owner: root
+        group: root
+        mode: '0644'
+        create: true
+  always:
+    - name: Delete temporary directory
+      ansible.builtin.file:
+        state: absent
+        path: "{{ nebula_install_temp_dir.path }}"
+      changed_when: false
+      delegate_to: localhost
+
+- name: Install - Create Nebula Group
+  ansible.builtin.group:
+    name: nebula
+    state: present
+    system: true
+
+- name: Install - Create Nebula User
+  ansible.builtin.user:
+    name: nebula
+    state: present
+    shell: /bin/false
+    home: /etc/nebula
+    create_home: true
+    system: true
+
+- name: Install - Create Nebula Config Directory
+  ansible.builtin.file:
+    path: "/etc/nebula"
+    state: directory
+    owner: nebula
+    group: nebula
+    mode: '0755'
+    
+- name: Install - Install SystemD Service
+  ansible.builtin.copy:
+    src: nebula.service
+    dest: /lib/systemd/system/nebula.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Restart nebula service
